@@ -342,6 +342,13 @@ public abstract class MobileActivity extends MotherActivity {
 
     @Override
     public void finishReally() {
+        if (MiniPlayerBridge.isActive() && MiniPlayerBridge.routeBackToPreviousMiniHost(this)) {
+            getViewManager().removeTop(this);
+            super.finish();
+            overridePendingTransition(0, 0);
+            return;
+        }
+
         // Mandatory line. Fix un-proper view order (especially for playback view).
         //
         // Mobile activities share one task, so normal Back should simply remove this Activity and

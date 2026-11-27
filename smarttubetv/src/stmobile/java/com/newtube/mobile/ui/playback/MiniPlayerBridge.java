@@ -364,9 +364,61 @@ public final class MiniPlayerBridge {
         }
 
         Intent intent = new Intent(player, hostActivity);
-        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_NO_ANIMATION);
         player.startActivity(intent);
         player.overridePendingTransition(0, 0);
+        return true;
+    }
+
+    /**
+     * Reorder the previous live host above the retained player before a host finishes. This avoids
+     * exposing the player's full-screen window during Back from a page above it.
+     */
+    public static boolean routeBackToPreviousMiniHost(Activity closingActivity) {
+        if (!(closingActivity instanceof MiniHost)) {
+            return false;
+        }
+
+        int closingIndex = -1;
+        for (int i = sMiniHosts.size() - 1; i >= 0; i--) {
+            if (sMiniHosts.get(i).get() == closingActivity) {
+                closingIndex = i;
+                break;
+            }
+        }
+        if (closingIndex < 0) {
+            return false;
+        }
+
+        int startIndex = closingIndex - 1;
+        Activity destination = null;
+        for (int i = startIndex; i >= 0; i--) {
+            MiniHost candidate = sMiniHosts.get(i).get();
+            if (candidate == null) {
+                sMiniHosts.remove(i);
+            } else if (candidate instanceof Activity) {
+                Activity host = (Activity) candidate;
+                if (!host.isFinishing() && !host.isDestroyed()) {
+                    destination = host;
+                    break;
+                }
+                sMiniHosts.remove(i);
+            }
+        }
+
+        if (destination == null || destination == closingActivity) {
+            return false;
+        }
+
+        Intent intent = new Intent(closingActivity, destination.getClass());
+        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        closingActivity.startActivity(intent);
+        closingActivity.overridePendingTransition(0, 0);
+        removeMiniHost((MiniHost) closingActivity);
         return true;
     }
 
