@@ -615,6 +615,9 @@ public class MobileSearchActivity extends MobileActivity
 
     @Override
     protected void onDestroy() {
+        if (mMiniPlayer != null) {
+            mMiniPlayer.onHostDestroy();
+        }
         MiniPlayerBridge.unregisterMiniHost(this);
         mTornDown = true; // NEWTUBE(shorts): the teardown's spinner-off must not page on
 

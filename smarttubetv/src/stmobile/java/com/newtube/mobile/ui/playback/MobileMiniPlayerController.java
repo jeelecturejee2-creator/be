@@ -68,6 +68,7 @@ public final class MobileMiniPlayerController {
     /** NEWTUBE(motion): pre-drawn for a minimize; the buttons fade in once the host is in front. */
     private boolean mButtonsFadePending;
     private final MiniPlayerBridge.CardFold mCardFold = this::foldForPlayer;
+    private final Runnable mHostExpandOverlayReset = this::clearExpandOverlay;
 
     public MobileMiniPlayerController(Activity activity) {
         mActivity = activity;
@@ -110,13 +111,19 @@ public final class MobileMiniPlayerController {
 
             @Override
             public void onExpansionProgress(float progress) {
-                setControlsAlpha(1f - progress);
+                setControlsAlpha(1f - Math.min(1f, progress / 0.15f));
+            }
+
+            @Override
+            public boolean expandsOnHost() {
+                return true;
             }
 
             @Override
             public void onSwipedUp(Rect currentBounds, float yVelocity) {
                 if (!mClosing && MiniPlayerBridge.isActive()) {
-                    expand(currentBounds, yVelocity);
+                    MiniPlayerBridge.setMiniBounds(currentBounds, yVelocity);
+                    MiniPlayerBridge.expandAtTop(mActivity);
                 }
             }
         }, mFrame, mBar);
@@ -220,6 +227,17 @@ public final class MobileMiniPlayerController {
         }
     }
 
+    /** Clear the transformed host card after the expanded player has drawn over it. */
+    private void clearExpandOverlay() {
+        MiniPlayerBridge.clearPendingCardFold(mCardFold);
+        fold();
+    }
+
+    /** Unregister this Activity-bound callback when its host is destroyed. */
+    public void onHostDestroy() {
+        MiniPlayerBridge.unregisterHostExpandOverlayReset(mHostExpandOverlayReset);
+    }
+
     /** The host is covered: a card still waiting to be folded can go now. */
     public void onHostStop() {
         hide();
@@ -228,6 +246,7 @@ public final class MobileMiniPlayerController {
     /** Show the live mini session. Optionally animate it down from the watch-page video box. */
     public void sync(boolean animateFromPlayer) {
         finishClose(); // a card closing when this runs is closed, not brought back
+        MiniPlayerBridge.registerHostExpandOverlayReset(mHostExpandOverlayReset);
         MiniPlayerBridge.clearPendingCardFold(mCardFold);
         ExoPlayer player = MiniPlayerBridge.getPlayer();
         if (player == null) {

@@ -1961,7 +1961,7 @@ public class MobileBrowseActivity extends MobileActivity
         super.onResume();
 
         getWindow().getDecorView().removeCallbacks(mClearHostExpandOverlayFallback);
-        MiniPlayerBridge.registerHostExpandOverlayReset(this::clearHostExpandOverlay);
+        MiniPlayerBridge.registerHostExpandOverlayReset(mClearHostExpandOverlayFallback);
         if (mPresenter != null) {
             mPresenter.onViewResumed();
         }
@@ -2105,7 +2105,7 @@ public class MobileBrowseActivity extends MobileActivity
     @Override
     protected void onDestroy() {
         getWindow().getDecorView().removeCallbacks(mClearHostExpandOverlayFallback);
-        MiniPlayerBridge.registerHostExpandOverlayReset(null);
+        MiniPlayerBridge.unregisterHostExpandOverlayReset(mClearHostExpandOverlayFallback);
         unwatchMiniScreenOn(); // the shared player outlives this Activity
         mNavHandler.removeCallbacks(mNavRebuild);
         mNavHandler.removeCallbacks(mRunwayCheck);

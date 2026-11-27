@@ -108,6 +108,13 @@ public final class MiniPlayerBridge {
         sHostExpandOverlayReset = reset;
     }
 
+    /** Unregister only if this is still the active host's callback. */
+    public static void unregisterHostExpandOverlayReset(Runnable reset) {
+        if (sHostExpandOverlayReset == reset) {
+            sHostExpandOverlayReset = null;
+        }
+    }
+
     /** Clear the host overlay once the expanded playback view has safely drawn. */
     public static void notifyExpandHandoffComplete() {
         if (sHostExpandOverlayReset != null) {

@@ -525,6 +525,9 @@ public class MobileChannelUploadsActivity extends MobileActivity
 
     @Override
     protected void onDestroy() {
+        if (mMiniPlayer != null) {
+            mMiniPlayer.onHostDestroy();
+        }
         MiniPlayerBridge.unregisterMiniHost(this);
         mTornDown = true;
 
