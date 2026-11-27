@@ -2,6 +2,7 @@ package com.newtube.mobile.ui.playback;
 
 import android.app.Activity;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.view.TextureView;
@@ -17,6 +18,7 @@ import android.widget.ProgressBar;
 import androidx.annotation.Nullable;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
+import com.google.android.material.card.MaterialCardView;
 import com.liskovsoft.smartyoutubetv2.common.utils.Utils;
 import com.liskovsoft.smartyoutubetv2.tv.R;
 import com.newtube.mobile.ui.common.FrameGate;
@@ -38,6 +40,7 @@ public final class MobileMiniPlayerController {
 
     private final Activity mActivity;
     private final View mBar;
+    private final View mExpansionBackdrop;
     /** NEWTUBE(haptics): stopped before this controller moves the card itself (MiniCardSwipe#stop). */
     private MiniCardSwipe mSwipe;
     private final FrameLayout mFrame;
@@ -73,6 +76,7 @@ public final class MobileMiniPlayerController {
     public MobileMiniPlayerController(Activity activity) {
         mActivity = activity;
         mBar = activity.findViewById(R.id.mobile_mini_player);
+        mExpansionBackdrop = activity.findViewById(R.id.mobile_mini_expand_backdrop);
         mFrame = activity.findViewById(R.id.mobile_mini_player_frame);
         mFreeze = activity.findViewById(R.id.mobile_mini_freeze);
         mPlayPause = activity.findViewById(R.id.mobile_mini_play_pause);
@@ -112,6 +116,7 @@ public final class MobileMiniPlayerController {
             @Override
             public void onExpansionProgress(float progress) {
                 setControlsAlpha(1f - Math.min(1f, progress / 0.15f));
+                updateExpansionBackdrop(progress);
             }
 
             @Override
@@ -229,8 +234,33 @@ public final class MobileMiniPlayerController {
 
     /** Clear the transformed host card after the expanded player has drawn over it. */
     private void clearExpandOverlay() {
+        resetExpansionBackdrop();
         MiniPlayerBridge.clearPendingCardFold(mCardFold);
         fold();
+    }
+
+    private void updateExpansionBackdrop(float progress) {
+        if (progress <= 0f) {
+            resetExpansionBackdrop();
+            return;
+        }
+        setMiniCardTransparent(true);
+        float backdropAlpha = progress <= 0.70f
+                ? 0f
+                : Math.max(0f, Math.min(1f, (progress - 0.70f) / 0.30f));
+        mExpansionBackdrop.setAlpha(backdropAlpha);
+    }
+
+    private void resetExpansionBackdrop() {
+        mExpansionBackdrop.setAlpha(0f);
+        setMiniCardTransparent(false);
+    }
+
+    private void setMiniCardTransparent(boolean transparent) {
+        if (mBar instanceof MaterialCardView) {
+            ((MaterialCardView) mBar).setCardBackgroundColor(
+                    transparent ? Color.TRANSPARENT : Color.BLACK);
+        }
     }
 
     /** Unregister this Activity-bound callback when its host is destroyed. */
@@ -246,6 +276,7 @@ public final class MobileMiniPlayerController {
     /** Show the live mini session. Optionally animate it down from the watch-page video box. */
     public void sync(boolean animateFromPlayer) {
         finishClose(); // a card closing when this runs is closed, not brought back
+        resetExpansionBackdrop();
         MiniPlayerBridge.registerHostExpandOverlayReset(mHostExpandOverlayReset);
         MiniPlayerBridge.clearPendingCardFold(mCardFold);
         ExoPlayer player = MiniPlayerBridge.getPlayer();
