@@ -2,6 +2,7 @@ package com.newtube.mobile.ui.playback;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
@@ -19,6 +20,9 @@ import com.liskovsoft.smartyoutubetv2.common.app.views.PlaybackView;
 import com.liskovsoft.smartyoutubetv2.common.app.views.ViewManager;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
 /**
  * Hand-off state for the YouTube-style in-app mini-player.
@@ -74,7 +78,7 @@ public final class MiniPlayerBridge {
 
     private static WeakReference<MobilePlaybackActivity> sActivity = new WeakReference<>(null);
     private static WeakReference<MobilePlaybackActivity> sPendingNavigation = new WeakReference<>(null);
-    private static WeakReference<MiniHost> sMiniHost = new WeakReference<>(null);
+    private static final List<WeakReference<MiniHost>> sMiniHosts = new ArrayList<>();
     private static long sPendingNavigationAtMs;
     private static boolean sActive;
     private static Bitmap sHandoffStill;
@@ -82,6 +86,7 @@ public final class MiniPlayerBridge {
     private static Rect sMiniBounds;
     private static float sMiniExpansionVelocityY;
     private static boolean sExpandAtTopPending;
+    private static boolean sExpandRequestPending;
     @Nullable
     private static Runnable sHostExpandOverlayReset;
 
@@ -94,13 +99,37 @@ public final class MiniPlayerBridge {
      * registered while merely paused (the player on top of them must still find them).
      */
     public static void registerMiniHost(MiniHost host) {
-        sMiniHost = new WeakReference<>(host);
+        removeMiniHost(host);
+        sMiniHosts.add(new WeakReference<>(host));
     }
 
     public static void unregisterMiniHost(MiniHost host) {
-        if (sMiniHost.get() == host) {
-            sMiniHost = new WeakReference<>(null);
+        removeMiniHost(host);
+        latestMiniHost();
+    }
+
+    private static void removeMiniHost(MiniHost host) {
+        Iterator<WeakReference<MiniHost>> iterator = sMiniHosts.iterator();
+        while (iterator.hasNext()) {
+            MiniHost registered = iterator.next().get();
+            if (registered == null || registered == host) {
+                iterator.remove();
+            }
         }
+    }
+
+    @Nullable
+    private static MiniHost latestMiniHost() {
+        for (int i = sMiniHosts.size() - 1; i >= 0; i--) {
+            MiniHost host = sMiniHosts.get(i).get();
+            if (host == null || host instanceof Activity
+                    && (((Activity) host).isFinishing() || ((Activity) host).isDestroyed())) {
+                sMiniHosts.remove(i);
+                continue;
+            }
+            return host;
+        }
+        return null;
     }
 
     /** Register the host callback that clears the swipe-up expansion overlay. */
@@ -125,7 +154,7 @@ public final class MiniPlayerBridge {
     /** The registered destination host, or null (deep-linked player with no screen beneath). */
     @Nullable
     static MiniHost getMiniHost() {
-        return sMiniHost.get();
+        return latestMiniHost();
     }
 
     /**
@@ -136,7 +165,7 @@ public final class MiniPlayerBridge {
      * SurfaceTexture.
      */
     static boolean prepareMiniHostForHandoff(Runnable onDrawn) {
-        MiniHost host = sMiniHost.get();
+        MiniHost host = latestMiniHost();
         return host != null && host.prepareMiniPlayerForHandoff(onDrawn);
     }
 
@@ -222,6 +251,7 @@ public final class MiniPlayerBridge {
     /** Called when the playback activity takes its surface back (expand / new video / destroy). */
     public static void deactivate() {
         sActive = false;
+        sExpandRequestPending = false;
         sActivity = new WeakReference<>(null);
         sPendingNavigation = new WeakReference<>(null);
         sPendingNavigationAtMs = 0;
@@ -293,6 +323,51 @@ public final class MiniPlayerBridge {
         boolean pending = sExpandAtTopPending;
         sExpandAtTopPending = false;
         return pending;
+    }
+
+    /** Consume the signal that the player was deliberately opened from its mini-player. */
+    static boolean takeExpandRequestPending() {
+        boolean pending = sExpandRequestPending;
+        sExpandRequestPending = false;
+        return pending;
+    }
+
+    static void markExpandRequestPending() {
+        sExpandRequestPending = true;
+    }
+
+    /**
+     * A minimized player stays in the task to own playback. If Android exposes it while popping
+     * another screen, put the registered host back on top instead of treating that as an expand.
+     */
+    static boolean returnToMiniHost(Activity player) {
+        ViewManager viewManager = ViewManager.instance(player);
+        Class<?> topView = viewManager.getTopView();
+        Class<? extends Activity> hostActivity =
+                topView != null ? viewManager.getActivity(topView) : null;
+
+        if (hostActivity == null || hostActivity == player.getClass()) {
+            MiniHost registeredHost = latestMiniHost();
+            if (registeredHost instanceof Activity) {
+                Activity host = (Activity) registeredHost;
+                if (!host.isFinishing() && !host.isDestroyed()) {
+                    hostActivity = viewManager.getActivity(registeredHost.getMiniHostViewClass());
+                }
+            }
+        }
+
+        if (hostActivity == null || hostActivity == player.getClass()) {
+            hostActivity = viewManager.getRootActivity();
+        }
+        if (hostActivity == null || hostActivity == player.getClass()) {
+            return false;
+        }
+
+        Intent intent = new Intent(player, hostActivity);
+        intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        player.startActivity(intent);
+        player.overridePendingTransition(0, 0);
+        return true;
     }
 
     /** Consume the captured card frame (single use). */
@@ -372,13 +447,20 @@ public final class MiniPlayerBridge {
      * mini bar's PlayerView first so the surface is free.
      */
     public static void expand(Context context) {
-        ViewManager.instance(context).startView(PlaybackView.class);
+        sExpandRequestPending = true;
+        try {
+            ViewManager.instance(context).startView(PlaybackView.class);
+        } catch (RuntimeException e) {
+            sExpandRequestPending = false;
+            throw e;
+        }
     }
 
     /** Expand after the host has settled its card over the full-size video rectangle. */
     public static void expandAtTop(Context context) {
         Activity activity = context instanceof Activity ? (Activity) context : null;
         sExpandAtTopPending = true;
+        sExpandRequestPending = true;
         if (activity != null && Build.VERSION.SDK_INT >= 34) {
             activity.overrideActivityTransition(Activity.OVERRIDE_TRANSITION_OPEN, 0, 0);
         }
@@ -386,6 +468,7 @@ public final class MiniPlayerBridge {
             ViewManager.instance(context).startView(PlaybackView.class);
         } catch (RuntimeException e) {
             sExpandAtTopPending = false;
+            sExpandRequestPending = false;
             throw e;
         }
         if (activity != null) {

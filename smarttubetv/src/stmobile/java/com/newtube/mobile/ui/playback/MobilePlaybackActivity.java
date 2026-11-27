@@ -345,6 +345,8 @@ public class MobilePlaybackActivity extends MobileActivity
     private final List<Video> mQueueVideos = new ArrayList<>();
     private boolean mExpansionUiHeld;
     private boolean mAlreadyExpandedAtTop;
+    private boolean mMiniExpandRequested;
+    private boolean mYieldingToMiniHost;
     private boolean mExpandHandoffOverlayCleanupScheduled;
     private boolean mRelatedRenderDeferred;
     private boolean mRelatedSkeletonTimeoutDeferred;
@@ -462,6 +464,7 @@ public class MobilePlaybackActivity extends MobileActivity
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         mAlreadyExpandedAtTop = MiniPlayerBridge.takeExpandAtTopPending();
+        mMiniExpandRequested = MiniPlayerBridge.takeExpandRequestPending() || mAlreadyExpandedAtTop;
         mExpansionUiHeld = mAlreadyExpandedAtTop;
 
         SystemPipBridge.attach(this);
@@ -600,6 +603,9 @@ public class MobilePlaybackActivity extends MobileActivity
     protected void onNewIntent(Intent intent) {
         cancelClose();
         super.onNewIntent(intent);
+        if (MiniPlayerBridge.isActive()) {
+            MiniPlayerBridge.markExpandRequestPending();
+        }
         // REORDER_TO_FRONT reuses this instance after mini mode. The pending card snapshot means
         // this is a new feed selection, not a plain mini-card expansion.
         if (PlayerTransitionBridge.hasPending()) {
@@ -1464,9 +1470,22 @@ public class MobilePlaybackActivity extends MobileActivity
     protected void onResume() {
         super.onResume();
 
-        boolean alreadyExpandedAtTop = mAlreadyExpandedAtTop
-                || MiniPlayerBridge.takeExpandAtTopPending();
+        boolean alreadyExpandedAtTop = mAlreadyExpandedAtTop || MiniPlayerBridge.takeExpandAtTopPending();
+        boolean expandRequested = mMiniExpandRequested
+                || MiniPlayerBridge.takeExpandRequestPending()
+                || alreadyExpandedAtTop;
         mAlreadyExpandedAtTop = false;
+        mMiniExpandRequested = false;
+        if (MiniPlayerBridge.isActive() && !expandRequested
+                && !PlayerTransitionBridge.hasPending() && !mIsInPip && !mPipEnterPending) {
+            getViewManager().removeTop(this);
+            if (MiniPlayerBridge.returnToMiniHost(this)) {
+                mYieldingToMiniHost = true;
+                overridePendingTransition(0, 0);
+                return;
+            }
+            getViewManager().addTop(this);
+        }
         PlayerTransitionBridge.LaunchSnapshot launch = PlayerTransitionBridge.take();
 
         mIsResumed = true;
@@ -1690,9 +1709,10 @@ public class MobilePlaybackActivity extends MobileActivity
 
     @Override
     protected void onPause() {
-        if (mPresenter != null) {
+        if (!mYieldingToMiniHost && mPresenter != null) {
             mPresenter.onViewPaused();
         }
+        mYieldingToMiniHost = false;
 
         mIsResumed = false;
         updateOrientationHandBackListener();

@@ -265,6 +265,7 @@ public final class MobileMiniPlayerController {
 
     /** Unregister this Activity-bound callback when its host is destroyed. */
     public void onHostDestroy() {
+        MiniPlayerBridge.clearPendingCardFold(mCardFold);
         MiniPlayerBridge.unregisterHostExpandOverlayReset(mHostExpandOverlayReset);
     }
 
